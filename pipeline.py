@@ -6,6 +6,8 @@ import logging
 from collections import deque, defaultdict
 from typing import Deque
 
+from csi_decoder import decode_packet, estimate_size
+
 LOG_DIR = os.getenv("LOG_DIR", "logs")
 RAW_LOG = os.path.join(LOG_DIR, "raw.log")
 PROC_LOG = os.path.join(LOG_DIR, "processed.log")
@@ -70,60 +72,99 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
             raw = msg.get("raw", b"")
             pkt_len = msg.get("len", len(raw) if raw else 0)
 
-            # Normalize into schema
-            csi_packet = {
-                "timestamp": ts,
-                "node_id": src,
-                "rssi": None,
-                "channel": None,
-                "raw": raw.hex() if isinstance(raw, (bytes, bytearray)) else str(raw),
-                "len": pkt_len,
-            }
-
-            # log raw (json line)
             try:
-                raw_f.write(json.dumps(csi_packet) + "\n")
-            except Exception:
-                logger.exception("Failed to write raw log for %s", src)
+                while True:
+                    msg = await in_queue.get()
+                    ts = msg.get("timestamp", time.time())
+                    src = msg.get("src", "unknown")
+                    raw = msg.get("raw", b"")
+                    pkt_len = msg.get("len", len(raw) if raw else 0)
 
-            # Update health
-            node = nodes[src]
-            node.seen(ts)
+                    # Normalize into schema: ensure raw is hex string
+                    raw_hex = raw.hex() if isinstance(raw, (bytes, bytearray)) else str(raw)
+                    csi_packet = {
+                        "timestamp": ts,
+                        "node_id": src,
+                        "rssi": None,
+                        "channel": None,
+                        "raw": raw_hex,
+                        "len": pkt_len,
+                    }
 
-            pkt_rate = node.packet_rate_per_minute(ts)
+                    logger.info("Received packet from %s len=%d", src, pkt_len)
 
-            # Compute simple features
-            features = simple_features(raw if isinstance(raw, (bytes, bytearray)) else bytes())
+                    # log raw (json line)
+                    try:
+                        raw_f.write(json.dumps(csi_packet) + "\n")
+                    except Exception:
+                        logger.exception("Failed to write raw log for %s", src)
 
-            # Heuristic motion score: normalized stddev
-            motion_score = features["std"] / 128.0
-            presence = motion_score > 0.05 or pkt_rate > 0.1
+                    # Update health
+                    node = nodes[src]
+                    node.seen(ts)
 
-            processed = {
-                "timestamp": ts,
-                "node_id": src,
-                "packet_rate": pkt_rate,
-                "rssi": node.rssi,
-                "features": features,
-                "motion": motion_score,
-                "presence": presence,
-                # breathing estimation placeholder (None)
-                "breathing": None,
-            }
+                    pkt_rate = node.packet_rate_per_minute(ts)
 
-            # log processed
-            try:
-                proc_f.write(json.dumps(processed) + "\n")
-            except Exception:
-                logger.exception("Failed to write processed log for %s", src)
+                    # Attempt to decode using csi_decoder
+                    try:
+                        decoded = decode_packet({"raw": raw_hex, "timestamp": ts, "node_id": src})
+                        iq = decoded.get("iq") or []
+                        iq_count = len(iq)
+                        payload_size = decoded.get("size", {}).get("payload", 0)
+                        logger.debug("Decoded packet %s: iq_pairs=%d payload=%d", src, iq_count, payload_size)
+                    except Exception:
+                        decoded = {"iq": [], "size": {}, "header": b""}
+                        iq = []
+                        iq_count = 0
+                        payload_size = 0
+                        logger.exception("CSI decode failed for packet from %s", src)
 
-            # push to out queue for websocket broadcasting
-            try:
-                out_queue.put_nowait(processed)
-                logger.debug("Enqueued processed message for %s (rate=%.2f motion=%.3f)", src, pkt_rate, motion_score)
-            except asyncio.QueueFull:
-                # if downstream is slow, drop the message
-                logger.warning("Out queue full, dropping processed message for %s", src)
-    finally:
-        raw_f.close()
-        proc_f.close()
+                    # Compute simple features on raw bytes (if available)
+                    try:
+                        raw_bytes = bytes.fromhex(raw_hex)
+                    except Exception:
+                        raw_bytes = bytes()
+
+                    features = simple_features(raw_bytes)
+
+                    # Heuristic motion score: normalized stddev or amplitude std if available
+                    if decoded.get("iq"):
+                        # use amplitude std if present
+                        amplitudes = [ (i*i + q*q)**0.5 for i, q in decoded["iq"] ]
+                        motion_score = (sum((a - (sum(amplitudes)/len(amplitudes)))**2 for a in amplitudes) / len(amplitudes)) ** 0.5 if amplitudes else features["std"] / 128.0
+                    else:
+                        motion_score = features["std"] / 128.0
+
+                    presence = motion_score > 0.05 or pkt_rate > 0.1
+
+                    processed = {
+                        "timestamp": ts,
+                        "node_id": src,
+                        "packet_rate": pkt_rate,
+                        "rssi": decoded.get("rssi") or node.rssi,
+                        "features": features,
+                        "motion": motion_score,
+                        "presence": presence,
+                        "iq_count": iq_count,
+                        "payload_size": payload_size,
+                        "decoded_notes": decoded.get("notes"),
+                        # breathing estimation placeholder (None)
+                        "breathing": None,
+                    }
+
+                    # log processed
+                    try:
+                        proc_f.write(json.dumps(processed) + "\n")
+                    except Exception:
+                        logger.exception("Failed to write processed log for %s", src)
+
+                    # push to out queue for websocket broadcasting
+                    try:
+                        out_queue.put_nowait(processed)
+                        logger.debug("Enqueued processed message for %s (rate=%.2f motion=%.3f iq=%d)", src, pkt_rate, motion_score, iq_count)
+                    except asyncio.QueueFull:
+                        # if downstream is slow, drop the message
+                        logger.warning("Out queue full, dropping processed message for %s", src)
+            finally:
+                raw_f.close()
+                proc_f.close()
