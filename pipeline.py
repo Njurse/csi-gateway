@@ -2,6 +2,7 @@ import asyncio
 import time
 import json
 import os
+import logging
 from collections import deque, defaultdict
 from typing import Deque
 
@@ -10,6 +11,8 @@ RAW_LOG = os.path.join(LOG_DIR, "raw.log")
 PROC_LOG = os.path.join(LOG_DIR, "processed.log")
 
 os.makedirs(LOG_DIR, exist_ok=True)
+
+logger = logging.getLogger(__name__)
 
 
 class NodeInfo:
@@ -53,6 +56,8 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
 
     nodes = defaultdict(NodeInfo)
 
+    logger.info("Pipeline started, logging raw -> %s, processed -> %s", RAW_LOG, PROC_LOG)
+
     # open log files in append mode
     raw_f = open(RAW_LOG, "a", buffering=1)
     proc_f = open(PROC_LOG, "a", buffering=1)
@@ -79,7 +84,7 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
             try:
                 raw_f.write(json.dumps(csi_packet) + "\n")
             except Exception:
-                pass
+                logger.exception("Failed to write raw log for %s", src)
 
             # Update health
             node = nodes[src]
@@ -110,14 +115,15 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
             try:
                 proc_f.write(json.dumps(processed) + "\n")
             except Exception:
-                pass
+                logger.exception("Failed to write processed log for %s", src)
 
             # push to out queue for websocket broadcasting
             try:
                 out_queue.put_nowait(processed)
+                logger.debug("Enqueued processed message for %s (rate=%.2f motion=%.3f)", src, pkt_rate, motion_score)
             except asyncio.QueueFull:
                 # if downstream is slow, drop the message
-                pass
+                logger.warning("Out queue full, dropping processed message for %s", src)
     finally:
         raw_f.close()
         proc_f.close()

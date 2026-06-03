@@ -1,12 +1,15 @@
 import asyncio
 import os
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 UDP_PORT = int(os.getenv("UDP_PORT", "5005"))
 
 
 async def start_udp_listener(queue: asyncio.Queue):
-    print(f"[UDP] Listening on {UDP_PORT}")
+    logger.info("Listening for UDP CSI on 0.0.0.0:%s", UDP_PORT)
 
     loop = asyncio.get_event_loop()
 
@@ -20,6 +23,7 @@ async def start_udp_listener(queue: asyncio.Queue):
             await asyncio.sleep(3600)
     except asyncio.CancelledError:
         transport.close()
+        logger.info("UDP listener cancelled, transport closed")
 
 
 class CSIProtocol:
@@ -29,20 +33,22 @@ class CSIProtocol:
 
     def connection_made(self, transport):
         self.transport = transport
-        print("[UDP] connection made")
+        logger.debug("UDP connection made")
 
     def datagram_received(self, data, addr):
+        src = addr[0] if addr else "unknown"
         try:
             self.queue.put_nowait({
                 "raw": data.hex(),
                 "len": len(data),
-                "src": addr[0],
+                "src": src,
             })
+            logger.debug("Received UDP packet from %s (%d bytes)", src, len(data))
         except Exception as e:
-            print("queue error:", e)
+            logger.exception("Failed to enqueue UDP packet from %s: %s", src, e)
 
     def error_received(self, exc):
-        print("[UDP] error:", exc)
+        logger.error("UDP error received: %s", exc)
 
     def connection_lost(self, exc):
-        print("[UDP] connection lost")
+        logger.info("UDP connection lost: %s", exc)
