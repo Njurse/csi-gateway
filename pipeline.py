@@ -83,7 +83,7 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
                 "len": pkt_len,
             }
 
-            logger.info("Received packet from %s len=%d", src, pkt_len)
+            logger.info("Received packet from %s len=%d\n%s", src, pkt_len,json.dumps(csi_packet))
 
             # log raw (json line)
             try:
