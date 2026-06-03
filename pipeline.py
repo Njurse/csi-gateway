@@ -103,7 +103,7 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
                 iq = decoded.get("iq") or []
                 iq_count = len(iq)
                 payload_size = decoded.get("size", {}).get("payload", 0)
-                logger.debug("Decoded packet %s: iq_pairs=%d payload=%d", src, iq_count, payload_size)
+                logger.info("Decoded packet %s: iq_pairs=%d payload=%d", src, iq_count, payload_size)
             except Exception:
                 decoded = {"iq": [], "size": {}, "header": b""}
                 iq = []
