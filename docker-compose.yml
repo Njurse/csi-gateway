@@ -1,0 +1,9 @@
+services:
+  csi-gateway:
+    build: .
+    ports:
+      - "5005:5005/udp"
+      - "8000:8000"
+    environment:
+      UDP_PORT: 5005
+      WS_PORT: 8000
