@@ -121,4 +121,3 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
     finally:
         raw_f.close()
         proc_f.close()
-*** End Patch
