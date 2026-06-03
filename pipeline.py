@@ -165,6 +165,6 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
                     except asyncio.QueueFull:
                         # if downstream is slow, drop the message
                         logger.warning("Out queue full, dropping processed message for %s", src)
-            finally:
-                raw_f.close()
-                proc_f.close()
+    finally:
+        raw_f.close()
+        proc_f.close()
