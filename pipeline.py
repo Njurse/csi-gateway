@@ -143,7 +143,7 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
                 # breathing estimation placeholder (None)
                 "breathing": None,
             }
-
+            logger.info("Processed the heuristic motion score and results are:\n%s", src, pkt_len,json.dumps(processed))
             # log processed
             try:
                 proc_f.write(json.dumps(processed) + "\n")
