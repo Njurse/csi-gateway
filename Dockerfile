@@ -6,7 +6,11 @@ WORKDIR /app
 # Use a simple dot copy so builds don't fail when there's no local `app` folder
 COPY . /app
 
-# Install dependencies (asyncio is in stdlib, but kept here if additional packages are added)
-RUN pip install websockets
+# Ensure Python output is unbuffered for real-time logs
+ENV PYTHONUNBUFFERED=1
+
+# Install dependencies from requirements.txt if present
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 CMD ["python", "main.py"]

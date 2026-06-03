@@ -7,3 +7,6 @@ services:
     environment:
       UDP_PORT: 5005
       WS_PORT: 8000
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
