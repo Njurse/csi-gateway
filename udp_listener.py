@@ -23,19 +23,26 @@ async def start_udp_listener(queue: asyncio.Queue):
 
 
 class CSIProtocol:
-    def __init__(self, queue: asyncio.Queue):
+    def __init__(self, queue):
         self.queue = queue
+        self.transport = None
 
-    def datagram_received(self, data: bytes, addr):
-        # Attach minimal metadata required by the pipeline
+    def connection_made(self, transport):
+        self.transport = transport
+        print("[UDP] connection made")
+
+    def datagram_received(self, data, addr):
         try:
-            msg = {
-                "timestamp": time.time(),
-                "src": addr[0],
+            self.queue.put_nowait({
+                "raw": data.hex(),
                 "len": len(data),
-                "raw": data,  # keep as bytes for downstream processing
-            }
-            # Use put_nowait so the UDP callback never blocks
-            self.queue.put_nowait(msg)
-        except Exception:
-            pass
+                "src": addr[0],
+            })
+        except Exception as e:
+            print("queue error:", e)
+
+    def error_received(self, exc):
+        print("[UDP] error:", exc)
+
+    def connection_lost(self, exc):
+        print("[UDP] connection lost")
