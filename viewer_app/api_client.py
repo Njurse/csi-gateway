@@ -17,4 +17,11 @@ class GatewayApiClient:
     def fetch_state(self) -> dict[str, Any]:
         response = requests.get(self._url("/api/state"), timeout=self.timeout_seconds)
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+        state = payload.get("state")
+        if isinstance(state, dict):
+            merged = dict(payload)
+            merged.update(state)
+            merged.pop("state", None)
+            return merged
+        return payload

@@ -41,7 +41,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         state: GatewayState = getattr(self.server, "gateway_state")
 
         if parsed.path in {"/", "/api", "/api/state"}:
-            self._write_json({"ok": True, "service": "csi-gateway", "state": state.snapshot()})
+            snapshot = state.snapshot()
+            self._write_json({"ok": True, "service": "csi-gateway", **snapshot, "state": snapshot})
             return
 
         if parsed.path == "/api/health":
