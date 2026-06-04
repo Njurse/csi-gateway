@@ -5,6 +5,9 @@ import tkinter as tk
 from tkinter import messagebox
 from typing import Any
 
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+
 from .api_client import GatewayApiClient
 
 
@@ -43,7 +46,6 @@ class ViewerApp(tk.Tk):
         self.endpoint_var = tk.StringVar(value=initial_url)
 
         self._build_ui()
-        self.after(100, self._refresh_canvas)
         self.after(250, self.refresh_data)
 
     def _initial_host(self, url: str) -> str:
@@ -91,6 +93,8 @@ class ViewerApp(tk.Tk):
 
         self.canvas_panel = self._make_panel(body)
         self.canvas_panel.pack(side="left", fill="both", expand=True, padx=(0, 10))
+        self.canvas_panel.rowconfigure(0, weight=1)
+        self.canvas_panel.columnconfigure(0, weight=1)
 
         right = tk.Frame(body, bg=BACKGROUND)
         right.pack(side="right", fill="y")
@@ -100,8 +104,13 @@ class ViewerApp(tk.Tk):
         self.log_panel = self._make_panel(right, width=410)
         self.log_panel.pack(fill="both", expand=True, pady=(10, 0))
 
-        self.canvas = tk.Canvas(self.canvas_panel, bg=PANEL, highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True, padx=14, pady=14)
+        self.figure = Figure(figsize=(6.5, 4.8), facecolor=PANEL)
+        self.ax = self.figure.add_subplot(111, projection="3d")
+        self.figure_canvas = FigureCanvasTkAgg(self.figure, master=self.canvas_panel)
+        self.figure_widget = self.figure_canvas.get_tk_widget()
+        self.figure_widget.grid(row=0, column=0, sticky="nsew", padx=14, pady=14)
+        self.figure_widget.configure(bg=PANEL, highlightthickness=0)
+        self.figure.tight_layout(pad=1.2)
 
         info_header = tk.Label(self.info_panel, text="Node Information", font=("Segoe UI Semibold", 14), fg=TEXT, bg=PANEL)
         info_header.pack(anchor="w", padx=14, pady=(12, 6))
@@ -146,8 +155,7 @@ class ViewerApp(tk.Tk):
             self.after(self.poll_ms, self.refresh_data)
 
     def _render_offline(self):
-        self.canvas.delete("all")
-        self.canvas.create_text(20, 20, anchor="nw", text="Waiting for data feed...", fill=TEXT, font=("Segoe UI", 12, "bold"))
+        self._draw_offline_plot()
         self._set_text(self.info_text, "Connect to the API server to see node status and packet summaries.")
         self._set_text(self.log_text, "No packets received yet.")
 
@@ -158,53 +166,90 @@ class ViewerApp(tk.Tk):
         widget.configure(state="disabled")
 
     def _render_snapshot(self, snapshot: dict[str, Any]):
-        self.canvas.delete("all")
-        width = max(self.canvas.winfo_width(), 1)
-        height = max(self.canvas.winfo_height(), 1)
-        self._draw_stage(width, height)
-
         nodes = snapshot.get("nodes", []) or []
-        self._draw_nodes(nodes, width, height)
+        self._draw_plot(nodes, snapshot)
         self._render_info(nodes, snapshot)
         self._render_logs(snapshot)
 
-    def _draw_stage(self, width: int, height: int):
-        plane = [
-            34, int(height * 0.66),
-            int(width * 0.28), int(height * 0.50),
-            int(width * 0.96), int(height * 0.61),
-            int(width * 0.72), int(height * 0.79),
-        ]
-        self.canvas.create_polygon(*plane, fill="#cfcfcf", outline="#bebebe")
-        self.canvas.create_line(int(width * 0.22), int(height * 0.72), int(width * 0.78), int(height * 0.72), fill="#d0d0d0", width=2)
-        self.canvas.create_line(int(width * 0.34), int(height * 0.84), int(width * 0.34), int(height * 0.22), fill="#2144d0", width=3)
-        self.canvas.create_line(int(width * 0.18), int(height * 0.72), int(width * 0.84), int(height * 0.84), fill="#d62d2d", width=3)
-        self.canvas.create_line(int(width * 0.18), int(height * 0.72), int(width * 0.76), int(height * 0.50), fill="#2e9c39", width=3)
-        self.canvas.create_text(int(width * 0.36), int(height * 0.17), text="3D signal plane", fill=TEXT, font=("Segoe UI", 11, "bold"))
+    def _draw_offline_plot(self):
+        self._draw_plot([], {"latest_packet": None})
 
-    def _draw_nodes(self, nodes: list[dict[str, Any]], width: int, height: int):
-        if not nodes:
-            self.canvas.create_text(width // 2, height // 2, text="No nodes available yet", fill=TEXT, font=("Segoe UI", 13, "bold"))
-            return
+    def _draw_plot(self, nodes: list[dict[str, Any]], snapshot: dict[str, Any]):
+        self.ax.clear()
+        self.figure.set_facecolor(PANEL)
+        self.ax.set_facecolor("#fbf7f1")
 
-        total = len(nodes)
-        for index, node in enumerate(nodes):
-            packet_rate = float(node.get("packet_rate") or 0.0)
-            motion = float(node.get("motion") or 0.0)
-            presence = bool(node.get("presence"))
-            node_id = str(node.get("node_id") or f"node-{index + 1}")
+        self.ax.view_init(elev=24, azim=-58)
+        self.ax.set_box_aspect((1.2, 1.0, 0.85))
+        self.ax.dist = 9
 
-            normalized_rate = min(packet_rate / 20.0, 1.0)
-            normalized_motion = min(motion / 0.25, 1.0)
+        # Floor plane
+        floor_x = [-3.2, 3.2, 3.2, -3.2]
+        floor_y = [-3.2, -3.2, 3.2, 3.2]
+        floor_z = [0, 0, 0, 0]
+        self.ax.plot_trisurf(floor_x, floor_y, floor_z, color="#d8d8d8", alpha=0.55, linewidth=0.2, shade=False)
 
-            base_x = int(width * 0.24 + (index / max(total - 1, 1)) * width * 0.46)
-            base_y = int(height * 0.70 - normalized_rate * height * 0.28 - normalized_motion * height * 0.12)
-            radius = 10 + int(normalized_motion * 14)
-            color = GOOD if presence else WARN
+        # Axes lines
+        self.ax.plot([-3.0, 3.0], [0, 0], [0, 0], color="#d62d2d", linewidth=3)
+        self.ax.plot([0, 0], [-3.0, 3.0], [0, 0], color="#2e9c39", linewidth=3)
+        self.ax.plot([0, 0], [0, 0], [0, 3.2], color="#2144d0", linewidth=3)
 
-            self.canvas.create_oval(base_x - radius, base_y - radius, base_x + radius, base_y + radius, fill=color, outline="#0f0f0f", width=2)
-            self.canvas.create_text(base_x, base_y - radius - 12, text=node_id, fill=TEXT, font=("Segoe UI", 10, "bold"))
-            self.canvas.create_text(base_x, base_y + radius + 10, text=f"rate {packet_rate:.1f}  motion {motion:.3f}", fill=TEXT, font=("Segoe UI", 9))
+        self.ax.text(3.15, 0, 0, "X", color="#d62d2d", fontsize=10, fontweight="bold")
+        self.ax.text(0, 3.15, 0, "Y", color="#2e9c39", fontsize=10, fontweight="bold")
+        self.ax.text(0, 0, 3.35, "Z", color="#2144d0", fontsize=10, fontweight="bold")
+
+        if nodes:
+            xs = []
+            ys = []
+            zs = []
+            sizes = []
+            colors = []
+
+            total = len(nodes)
+            for index, node in enumerate(nodes):
+                packet_rate = float(node.get("packet_rate") or 0.0)
+                motion = float(node.get("motion") or 0.0)
+                presence = bool(node.get("presence"))
+                node_id = str(node.get("node_id") or f"node-{index + 1}")
+
+                x = -2.2 + (index / max(total - 1, 1)) * 4.4
+                y = max(min((packet_rate / 20.0) * 2.4 - 1.2, 2.2), -2.2)
+                z = max(min(motion * 18.0, 2.8), 0.05)
+
+                xs.append(x)
+                ys.append(y)
+                zs.append(z)
+                sizes.append(70 + min(motion * 420.0, 260.0))
+                colors.append(GOOD if presence else WARN)
+
+                self.ax.text(x, y, z + 0.12, node_id, color=TEXT, fontsize=9, ha="center")
+
+            self.ax.scatter(xs, ys, zs, s=sizes, c=colors, alpha=0.95, edgecolors="#111111", linewidths=0.8, depthshade=True)
+
+        latest_packet = snapshot.get("latest_packet") or {}
+        if latest_packet:
+            label = (
+                f"Latest: {latest_packet.get('node_id', 'unknown')}  "
+                f"motion={float(latest_packet.get('motion') or 0.0):.3f}  "
+                f"presence={bool(latest_packet.get('presence'))}"
+            )
+            self.ax.text2D(0.02, 0.95, label, transform=self.ax.transAxes, color=TEXT, fontsize=10, fontweight="bold")
+        else:
+            self.ax.text2D(0.02, 0.95, "Waiting for data feed...", transform=self.ax.transAxes, color=TEXT, fontsize=10, fontweight="bold")
+
+        self.ax.set_xlim(-3.2, 3.2)
+        self.ax.set_ylim(-3.2, 3.2)
+        self.ax.set_zlim(0, 3.4)
+        self.ax.set_xlabel("Lateral")
+        self.ax.set_ylabel("Depth")
+        self.ax.set_zlabel("Motion")
+        self.ax.grid(False)
+
+        for axis in (self.ax.xaxis, self.ax.yaxis, self.ax.zaxis):
+            axis.set_pane_color((1, 1, 1, 0))
+
+        self.figure.tight_layout(pad=1.0)
+        self.figure_canvas.draw_idle()
 
     def _render_info(self, nodes: list[dict[str, Any]], snapshot: dict[str, Any]):
         lines = []
