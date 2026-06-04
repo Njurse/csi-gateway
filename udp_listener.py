@@ -26,7 +26,7 @@ async def start_udp_listener(queue: asyncio.Queue):
         logger.info("UDP listener cancelled, transport closed")
 
 
-class CSIProtocol:
+class CSIProtocol(asyncio.DatagramProtocol):
     def __init__(self, queue):
         self.queue = queue
         self.transport = None
