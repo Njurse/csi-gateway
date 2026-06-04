@@ -49,7 +49,7 @@ def simple_features(raw: bytes):
     return {"len": n, "mean": mean, "std": std}
 
 
-async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
+async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue, shared_state=None):
     """
     Consume raw UDP messages from `in_queue`, normalize into CSI_Packet schema,
     update node health, compute simple features and heuristics, log raw+processed,
@@ -144,6 +144,13 @@ async def start_pipeline(in_queue: asyncio.Queue, out_queue: asyncio.Queue):
                 "breathing": None,
             }
             logger.info("Processed the heuristic motion score and results are:\n%s", json.dumps(processed))
+
+            if shared_state is not None:
+                try:
+                    shared_state.update_packet(processed)
+                except Exception:
+                    logger.exception("Failed to update shared state for %s", src)
+
             # log processed
             try:
                 proc_f.write(json.dumps(processed) + "\n")

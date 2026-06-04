@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+from gateway_api.server import start_api_server
+from gateway_api.state import GatewayState
 from udp_listener import start_udp_listener
 from ws_server import start_ws_server
 from pipeline import start_pipeline
@@ -31,11 +33,13 @@ async def main():
 
     ingest_queue = asyncio.Queue()
     ws_queue = asyncio.Queue()
+    shared_state = GatewayState()
 
     await asyncio.gather(
         start_udp_listener(ingest_queue),
-        start_pipeline(ingest_queue, ws_queue),
+        start_pipeline(ingest_queue, ws_queue, shared_state),
         start_ws_server(ws_queue),
+        start_api_server(shared_state),
     )
 
 

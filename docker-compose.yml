@@ -3,10 +3,12 @@ services:
     build: .
     ports:
       - "5005:5005/udp"
-      - "8000:8000"
+      - "4000:4000"
+      - "4040:4040"
     environment:
       UDP_PORT: 5005
-      WS_PORT: 8000
+      WS_PORT: 4000
+      API_PORT: 4040
     restart: unless-stopped
     volumes:
       - ./logs:/app/logs

@@ -5,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-WS_PORT = int(os.getenv("WS_PORT", "8000"))
+WS_PORT = int(os.getenv("WS_PORT", "4000"))
 
 clients = set()
 
